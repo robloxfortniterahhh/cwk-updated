@@ -1,31 +1,35 @@
-import hmac
-import hashlib
+# Standard library imports
+import argparse
 import base64
 import gzip
+import hmac
 import hashlib
-from io import BytesIO
 import json
+import logging
+import os
 import random
 import re
-import shutil
 import secrets
+import shutil
 import string
 import subprocess
-import schedule
 import threading
 import time
-from flask import Flask, Request, render_template, make_response, jsonify, request, redirect, abort, send_from_directory
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_bcrypt import Bcrypt
-import os
-import argparse
-from urllib.parse import parse_qs
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from urllib.parse import parse_qs
+
+# Third-party library imports
+import schedule
+from flask import (Flask, Request, abort, jsonify, make_response, redirect,
+                   render_template, request, send_from_directory)
+from flask_bcrypt import Bcrypt
+from flask_login import (LoginManager, UserMixin, current_user,
+                         login_required, login_user, logout_user)
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
-import discord_webhook
-from datetime import datetime, timedelta, timezone
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=5000)
@@ -294,7 +298,6 @@ def AdminCreateAdmin():
 def AdminPlayers():
 	if not isAdmin(current_user):
 		return abort(404)
-
 	players = Player.query.all()
 
 	#convert player to dict
@@ -307,7 +310,7 @@ def AdminPlayers():
 	players = [player for player in players if not IsUserBanned(player["username"])]
 
 	for player in players:
-		player["last_online"] = datetime.fromtimestamp(player["last_online"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
+		player["last_online"] = datetime.fromtimestamp(player["last_online"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
 		#if player's multiplayer name is empty, attempt to get it from their game
 		if player["multiplayer_name"] == None:
@@ -323,7 +326,6 @@ def AdminPlayers():
 	return render_template('admin_players.html', players=players, player_count=len(players))
 
 def GetNameFromSave(save):
-
 	try:
 		game = DecryptGameData(save)
 	except Exception:
@@ -445,7 +447,6 @@ def AdminPlayerGame(player):
 def AdminPlayerGameEdit(player):
     if not isAdmin(current_user):
         return abort(404)
-
     player = Player.query.filter_by(username=player).first()
 
     if player is None:
@@ -458,17 +459,7 @@ def AdminPlayerGameEdit(player):
 
     print("Received game data:", game)
 
-    try:
-        # Update game data
-        player.game = game
-        db.session.commit()
-        print("Game data updated successfully.")
-    except Exception as e:
-        db.session.rollback()  # Rollback if something goes wrong
-        print("Error updating game data:", str(e))
-        return make_response("Failed to update game data.", 500)
-
-    Log("admin", current_user.username + " edited game data for player: " + player.username)
+    Log("admin", current_user.username + " accessed game data for player: " + player.username)
     return redirect("/admin/players/" + player.username)
 
 def DecryptGameData(game:str):
@@ -489,7 +480,7 @@ def DecryptGameData(game:str):
 
 	#attempt to clean json
 	decoded_data = decoded_data.replace(',}', '}').replace(',],', '],').replace(',]', ']').replace(',,', ',')
-
+    
 	return json.loads(decoded_data)
 
 @login_required
@@ -518,7 +509,67 @@ def AdminPlayerAction(player, action):
 	DiscordWebhookMessage(current_user.username + " performed " + action + " on ID: " + player)
 	return redirect("/admin/players/" + player)
 
+def SystemBan(username):
+	Log("admin", "SYSTEM BANNED " + username)
+	if not IsUserBanned(username):
+		newban = Bans(username=username, bantype="userid", author="SYSTEM", time=int(time.time()))
+		db.session.add(newban)
+		db.session.commit()
+		DiscordWebhookMessage("SYSTEM performed ban on ID: " + username)
 
+
+@app.route("/admin/players/transfer", methods=['POST'])
+def AdminPlayerTransfer():
+    # Fetch API key from the request headers
+    api_key = request.headers.get("API-Key")
+
+    # Validate the API key
+    if api_key != "9df81b2c-4f3a-41c7-8a3e-e28c0f6d9c49":
+        return jsonify({"error": "Unauthorized access"}), 403
+
+    # Get the player IDs and leader_level from the request
+    data = request.json
+    id1 = data.get("id1")
+    id2 = data.get("id2")
+    leader_level = data.get("leader_level")
+
+    if not id1 or not id2 or not leader_level:
+        return jsonify({"error": "Both player IDs and leader level are required"}), 400
+
+    # Check if the IDs are the same
+    if id1 == id2:
+        return jsonify({"error": "Player IDs cannot be the same for both players"}), 400
+
+    # Fetch players
+    player1 = Player.query.filter_by(username=id1).first()
+    player2 = Player.query.filter_by(username=id2).first()
+
+    if not player1 or not player2:
+        return jsonify({"error": "One or both players not found"}), 404
+
+    try:
+        # Convert the leader_level to an integer (if it isn't already)
+        leader_level = int(leader_level.strip())  # Strip any extra spaces and convert to integer
+
+        # Check if the leader level matches
+        if player1.leader_level != leader_level:
+            return jsonify({"error": f"Rank does not match for player {id1}. Make sure you enter the correct one."}), 400
+
+        # Directly transfer the game data (without decryption)
+        if player1.game:
+            player2.game = player1.game  # Transfer the .bin file as is, no decryption needed
+        else:
+            logging.error(f"No game data found for {id1}")
+            return jsonify({"error": "No game data to transfer from player 1"}), 400
+
+        db.session.commit()
+
+        logging.info(f"Transferred progress from {id1} to {id2}")
+        return jsonify({"success": f"Progress transferred from {id1} to {id2}"}), 200
+
+    except Exception as e:
+        logging.error(f"Error during transfer: {str(e)}")
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
 
 @login_required
 @app.route("/admin/ipban/<ip>/unban")
@@ -921,13 +972,7 @@ def MultiplayerUpdateDeckName():
 	db_user.helper_creature = clientData["helper_creature"]
 	db_user.leader = clientData["leader"]
 
-	#if this is a fresh account and user is attempting to set leader level to a high number, ban user
-	if db_user.leader_level is None and int(clientData["leader_level"]) > 9999999:
-		DiscordWebhookMessage(f"{clientData['player_id']} attempted to set leader level to a {clientData['leader_level']} on a fresh account! IP: " + IPFromRequest(request))
-		SystemBan(clientData["player_id"])
-	elif db_user.leader_level is not None and int(clientData["leader_level"]) > int(db_user.leader_level) + 9999999: #Make sure leader level is incremented by more than 10, if not, ban user
-		DiscordWebhookMessage(f"{clientData['player_id']} attempted to set leader level to {clientData['leader_level']} when it was set to {db_user.leader_level}! IP: " + IPFromRequest(request))
-		SystemBan(clientData["player_id"])
+
 
 	db_user.leader_level = clientData["leader_level"]
 	db_user.allyboxspace = clientData["allyboxspace"]
