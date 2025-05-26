@@ -25,6 +25,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
 import discord_webhook
+from datetime import datetime, timedelta, timezone
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', type=int, default=5000)
@@ -64,7 +65,7 @@ def PersistVersion():
 		pc_version = f.read()
 	with open("data/persist/android_version.txt", "r") as f:
 		android_version = f.read()
-  
+
 	data = {
 		"maintenance_mode": "yes" if maintenance else "no",
 		"message": "Card Wars Kingdom is currently undergoing maintenance.\n\nPlease try again later.",
@@ -83,14 +84,14 @@ class AdminActivity(db.Model):
     message = db.Column(db.String(8192), nullable=True)
 
 def DiscordWebhookMessage(message):
-    
+
 	newActivity = AdminActivity(
 		time=int(time.time()),
 		message=message
 	)
 	db.session.add(newActivity)
 	db.session.commit()
-    
+
 	#check if the file exists
 	if not os.path.exists("discordwebhookurl"):
 		return
@@ -103,22 +104,22 @@ def DiscordWebhookMessage(message):
 	except:
 		Log("admin", "Failed to send webhook message: " + message)
 		pass
- 
+
 class Admin(UserMixin, db.Model):
 	username: Mapped[str] = mapped_column(db.String(80), primary_key=True, unique=True, nullable=False)
 	password: Mapped[str] = mapped_column(db.String(80), nullable=False)
 	rank: Mapped[int] = mapped_column(db.Integer, nullable=False)
- 
+
 	def get_id(self):
 		return str(self.username)
- 
+
 @login_manager.user_loader
 def load_user(user_id):
 	return Admin.query.get(user_id)
- 
+
 @app.route("/admin", methods=['GET', 'POST'])
 def AdminPage():
-    
+
     #create an admin account if one doesn't exist
 	if not Admin.query.first():
 		randompassword = ''.join(random.choices(string.ascii_letters + string.digits, k=24))
@@ -127,7 +128,7 @@ def AdminPage():
 		db.session.commit()
 		Log("server", "Created admin account")
 		print(f"Admin account created! Username: admin, Password: {randompassword}")
-    
+
 	if request.method == 'GET':
 		if current_user.is_authenticated:
 			if not isAdmin(current_user):
@@ -162,11 +163,11 @@ def AdminHome():
 	adminActivity = AdminActivity.query.order_by(AdminActivity.time).all()
 	#convert time
 	for log in adminActivity:
-		log.time = datetime.fromtimestamp(log.time, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-  
+		log.time = datetime.fromtimestamp(log.time, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
+
 	#reverse list
 	adminActivity.reverse()
-		
+
 	return render_template('admin_home.html', Activity=adminActivity)
 
 @login_required
@@ -176,12 +177,12 @@ def AdminVersions():
 		return abort(404)
 
 	if request.method == 'GET':
-		
+
 		return render_template('admin_versions.html' , pc_version=open("data/persist/version.txt", "r").read(), android_version=open("data/persist/android_version.txt", "r").read())
 	elif request.method == 'POST':
 		form = request.form
 		form = {k: v[0] if len(v) == 1 else v for k, v in form.items()}
-  
+
 		if "pc_version" not in form or form["pc_version"] == "":
 			return make_response("Invalid PC version!", 400)
 		if "android_version" not in form or form["android_version"] == "":
@@ -192,7 +193,7 @@ def AdminVersions():
 			f.write(form["pc_version"])
 		with open("data/persist/android_version.txt", "w") as f:
 			f.write(form["android_version"])
-  
+
 		return redirect("/admin/versions")
 
 @login_required
@@ -204,7 +205,7 @@ def AdminServer():
 	#create backup folder if it doesn't exist
 	if not os.path.exists("backup"):
 		os.makedirs("backup")
- 
+
 	#get last backup in folder
 	last_backup_time = 0
 	last_backup_file = ""
@@ -214,12 +215,12 @@ def AdminServer():
 			if file_time > last_backup_time:
 				last_backup_time = file_time
 				last_backup_file = file.replace(".zip", "")
-   
+
 	if last_backup_file == "":
 		last_backup = "Never"
 	else:
 		last_backup = time_ago_string(datetime.strptime(last_backup_file, "%Y-%m-%d_%H-%M-%S"))
-    
+
 	return render_template('admin_server.html', last_backup=last_backup)
 
 def time_ago_string(date_time):
@@ -238,7 +239,7 @@ def time_ago_string(date_time):
         return f"{minutes} {'minute' if minutes == 1 else 'minutes'} ago"
     else:
         return f"{time_difference.seconds} seconds ago"
-    
+
 @login_required
 @app.route("/admin/server/backup")
 def AdminBackup():
@@ -257,14 +258,14 @@ def AdminGitPull():
 		return abort(404)
 
 	Log("admin", current_user.username + " pulled from git.")
-	
+
 	#Git pull and return response
 	output = subprocess.check_output(["git", "pull"])
- 
+
 	Log("admin", "Pulled from git. Output: " + output.decode("utf-8"))
- 
+
 	#TODO: restart server
-	
+
 	return make_response(output.decode("utf-8"), 200)
 
 @login_required
@@ -278,7 +279,7 @@ def AdminCreateAdmin():
 	if request.method == 'POST':
 		username = request.form['username']
 		rank = request.form['rank']
-  
+
 		#create random password
 		password = secrets.token_urlsafe(24)
 		new_admin = Admin(username=username, password=bcrypt.generate_password_hash(password).decode('utf-8'), rank=int(rank))
@@ -295,34 +296,34 @@ def AdminPlayers():
 		return abort(404)
 
 	players = Player.query.all()
-	
+
 	#convert player to dict
 	players = [player.as_dict() for player in players]
- 
+
 	#remove any players that do not have a multiplayer name
 	players = [player for player in players if player["game"] != None and player["leader_level"] != None]
- 
+
 	#remove any player that is banned
 	players = [player for player in players if not IsUserBanned(player["username"])]
-	
+
 	for player in players:
-		player["last_online"] = datetime.fromtimestamp(player["last_online"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-  
+		player["last_online"] = datetime.fromtimestamp(player["last_online"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
+
 		#if player's multiplayer name is empty, attempt to get it from their game
 		if player["multiplayer_name"] == None:
 			player["multiplayer_name"] = GetNameFromSave(player["game"])
 
 	sortQuery = request.args.get('sort')
- 
+
 	if sortQuery is not None:
 		players = sorted(players, key=lambda player: player[sortQuery], reverse=True)
 	else:
 		players = players[::-1]
-	
+
 	return render_template('admin_players.html', players=players, player_count=len(players))
 
 def GetNameFromSave(save):
-    
+
 	try:
 		game = DecryptGameData(save)
 	except Exception:
@@ -331,6 +332,36 @@ def GetNameFromSave(save):
 		return None
 	return game["MultiplayerPlayerName"]
 
+@app.route("/online_players")
+def AdminOnlinePlayers():
+
+
+    players = Player.query.all()
+    players = [player.as_dict() for player in players]
+
+    # Get the current time minus five minutes (in UTC)
+    current_time = datetime.now(timezone.utc)
+    five_minutes_ago = current_time - timedelta(minutes=5)
+
+    online_players = []
+
+    # Log and check player last_online times
+    for player in players:
+        # Convert any bytes fields to string (e.g., multiplayer_name, game, etc.)
+        for key, value in player.items():
+            if isinstance(value, bytes):
+                player[key] = value.decode('utf-8')  # Decode bytes to string
+
+        if player["last_online"]:
+            last_online = datetime.fromtimestamp(player["last_online"], tz=timezone.utc)
+            if last_online >= five_minutes_ago:
+                online_players.append(player)
+
+    return {
+        "online_player_count": len(online_players)
+    }
+
+
 @login_required
 @app.route("/admin/players/<player>")
 def AdminPlayer(player):
@@ -338,14 +369,14 @@ def AdminPlayer(player):
 		return abort(404)
 
 	player = Player.query.filter_by(username=player).first()
- 
+
 	if player is None:
 		return make_response("No player found!", 404)
 
 	player = player.as_dict()
- 
-	player["last_online"] = datetime.fromtimestamp(player["last_online"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-	
+
+	player["last_online"] = datetime.fromtimestamp(player["last_online"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
+
 	game = None
 	try:
 		game = DecryptGameData(player["game"])
@@ -353,74 +384,92 @@ def AdminPlayer(player):
 			player["multiplayer_name"] = game["MultiplayerPlayerName"]
 	except Exception:
 		Log("admin", "Failed to decrypt player game data for player: " + player["username"])
-		game = None   
- 
+		game = None
+
 	if game is None:
-		return render_template('admin_player.html', player=player) 
+		return render_template('admin_player.html', player=player)
 
 	battle_history = game["BattleHistory"]
 	battle_history.sort(key=lambda x: x["recordTime"])
-	
+
 	for battle in battle_history:
-		battle["recordTime"] = datetime.fromtimestamp(battle["recordTime"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-  
+		battle["recordTime"] = datetime.fromtimestamp(battle["recordTime"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
+
 	#fix device name
 	if player["devicename"] is not None:
 		player["devicename"] = re.sub(r'%[0-9A-Fa-f]{2}', lambda m: chr(int(m.group(0)[1:], 16)), player["devicename"])
-  
+
 	Inventory = game["Inventory"]
-	
+
 	#remove all items that are not creatures
 	if Inventory is not None:
 		Inventory = [item for item in Inventory if item["_T"] == "CR"]
- 
-	return render_template('admin_player.html', player=player, is_banned=IsUserBanned(player["username"]), SoftCurrency=game["SoftCurrency"], HardCurrency=int(game["PaidHardCurrency"]) + int(game["FreeHardCurrency"]), PvpCurrency=game["PvpCurrency"], InstalledDate=datetime.fromtimestamp(game["InstalledDate"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'), PVPBanned=bool(game["Zxcvbnm"]), MultiplayerLevel=game["MultiplayerLevel"], InventorySpace=game["InventorySpace"], BattleHistory=battle_history, DeviceName=player["devicename"], Inventory=Inventory)
+
+	return render_template('admin_player.html', player=player, is_banned=IsUserBanned(player["username"]), SoftCurrency=game["SoftCurrency"], HardCurrency=int(game["PaidHardCurrency"]) + int(game["FreeHardCurrency"]), PvpCurrency=game["PvpCurrency"], InstalledDate=datetime.fromtimestamp(game["InstalledDate"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT'), PVPBanned=bool(game["Zxcvbnm"]), MultiplayerLevel=game["MultiplayerLevel"], InventorySpace=game["InventorySpace"], BattleHistory=battle_history, DeviceName=player["devicename"], Inventory=Inventory)
 
 @login_required
 @app.route("/admin/players/<player>/game")
 def AdminPlayerGame(player):
-	if not isAdmin(current_user):
-		return abort(404)
+    if not isAdmin(current_user):
+        return abort(404)
 
-	player = Player.query.filter_by(username=player).first()
- 
-	if player is None:
-		return make_response("No player found!", 404)
+    player = Player.query.filter_by(username=player).first()
 
-	player = player.as_dict()
- 
-	try:
-		game = DecryptGameData(player["game"])
-	except Exception: #save is most likely not encrypted
-		game = player["game"]
+    if player is None:
+        return make_response("No player found!", 404)
 
- 
-	if game is None:
-		return make_response("No game found!", 404)
+    player = player.as_dict()
 
-	return render_template('admin_player_game.html', game=game, player_id=player["username"])
+    try:
+        game = DecryptGameData(player["game"])
+    except Exception:  # save is most likely not encrypted
+        game = player["game"]
 
+    if game is None:
+        return make_response("No game found!", 404)
+
+    # تحويل الكائن إلى نص JSON بدون الهروب من علامات الاقتباس
+    game_json = json.dumps(game, ensure_ascii=False)
+
+    # إزالة علامات الاقتباس الزائدة في البداية والنهاية
+    if game_json.startswith('"') and game_json.endswith('"'):
+        game_json = game_json[1:-1]
+
+
+
+    game_json = game_json.replace('\\"', '"')
+
+    return render_template('admin_player_game.html', game=game_json, player_id=player["username"])
 @login_required
 @app.route("/admin/players/<player>/game/edit", methods=['POST'])
 def AdminPlayerGameEdit(player):
-	if not isAdmin(current_user):
-		return abort(404)
+    if not isAdmin(current_user):
+        return abort(404)
 
-	player = Player.query.filter_by(username=player).first()
- 
-	if player is None:
-		return make_response("No player found!", 404)
+    player = Player.query.filter_by(username=player).first()
 
-	#get game from post
-	game = request.form['player_game']
-	print(game)
-	#update game
-	player.game = game
-	db.session.commit()
- 
-	Log("admin", current_user.username + " edited game data for player: " + player.username)
- 
-	return redirect("/admin/players/" + player.username)
+    if player is None:
+        return make_response("No player found!", 404)
+
+    # Get game data from POST request
+    game = request.form.get('player_game')
+    if game is None:
+        return make_response("No game data provided!", 400)
+
+    print("Received game data:", game)
+
+    try:
+        # Update game data
+        player.game = game
+        db.session.commit()
+        print("Game data updated successfully.")
+    except Exception as e:
+        db.session.rollback()  # Rollback if something goes wrong
+        print("Error updating game data:", str(e))
+        return make_response("Failed to update game data.", 500)
+
+    Log("admin", current_user.username + " edited game data for player: " + player.username)
+    return redirect("/admin/players/" + player.username)
 
 def DecryptGameData(game:str):
 	if game is None or game == b"" or game == b" ":
@@ -450,7 +499,7 @@ def AdminPlayerAction(player, action):
 		return abort(404)
 
 	Log("admin", current_user.username + " performed " + action + " on " + player)
-		
+
 	if action == "ban":
 		#check if player id is in banlist, if not, add it
 		if not IsUserBanned(player):
@@ -469,13 +518,7 @@ def AdminPlayerAction(player, action):
 	DiscordWebhookMessage(current_user.username + " performed " + action + " on ID: " + player)
 	return redirect("/admin/players/" + player)
 
-def SystemBan(username):
-	Log("admin", "SYSTEM BANNED " + username)
-	if not IsUserBanned(username):
-		newban = Bans(username=username, bantype="userid", author="SYSTEM", time=int(time.time()))
-		db.session.add(newban)
-		db.session.commit()
-		DiscordWebhookMessage("SYSTEM performed ban on ID: " + username)
+
 
 @login_required
 @app.route("/admin/ipban/<ip>/unban")
@@ -484,14 +527,14 @@ def AdminIPBan(ip):
 		return abort(404)
 
 	Log("admin", current_user.username + " performed unban on " + ip)
-	
+
 	player_check = Bans.query.filter_by(username=ip).first()
 	db.session.delete(player_check)
 	db.session.commit()
- 
+
 	DiscordWebhookMessage(current_user.username + " performed unban on IP: " + ip)
 	return redirect("/admin/bannedips")
-  
+
 @login_required
 @app.route("/admin/ipban", methods=['POST'])
 def AdminIPBanAction():
@@ -499,14 +542,14 @@ def AdminIPBanAction():
 		return abort(404)
 
 	Log("admin", current_user.username + " performed ban on " + request.form['ip'])
-	
+
 	newban = Bans(username=request.form['ip'], bantype="ip", author=current_user.username, time=int(time.time()))
 	db.session.add(newban)
 	db.session.commit()
- 
+
 	DiscordWebhookMessage(current_user.username + " performed ban on IP: " + request.form['ip'])
 	return redirect("/admin/bannedips")
-  
+
 
 @login_required
 @app.route("/admin/bannedplayers")
@@ -516,15 +559,15 @@ def AdminBannedPlayers():
 
 	bans = Bans.query.filter_by(bantype="userid").all()
 	bans = [ban.as_dict() for ban in bans]
-	
+
 	#get player name
 	for ban in bans:
 		ban["multiplayer_name"] = Player.query.filter_by(username=ban["username"]).first().multiplayer_name
 		if ban["multiplayer_name"] is None:
 			ban["multiplayer_name"] = GetNameFromSave(Player.query.filter_by(username=ban["username"]).first().game)
 		if ban["time"] is not None:
-			ban["time"] = datetime.fromtimestamp(ban["time"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
- 
+			ban["time"] = datetime.fromtimestamp(ban["time"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
+
 	return render_template('admin_bannedplayers.html', bans=bans)
 
 @login_required
@@ -535,9 +578,9 @@ def AdminBannedIPs():
 
 	bans = Bans.query.filter_by(bantype="ip").all()
 	bans = [ban.as_dict() for ban in bans]
- 
+
 	for ban in bans:
-		ban["time"] = datetime.fromtimestamp(ban["time"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+		ban["time"] = datetime.fromtimestamp(ban["time"], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S GMT')
 	return render_template('admin_bannedips.html', bans=bans)
 
 @login_required
@@ -571,21 +614,21 @@ def Backup():
 	#get date and time
 	now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 	os.makedirs("backup/" + now, exist_ok=True)
- 
+
 	#copy database
 	shutil.copy("instance/cardwarskingdom.db", f"backup/{now}/cardwarskingdom.db")
- 
+
 	#copy persist folder
 	shutil.copytree("data/persist", f"backup/{now}/persist")
- 
+
 	#zip
 	shutil.make_archive("backup/" + now, 'zip', "backup/" + now)
- 
+
 	#delete folder
 	shutil.rmtree("backup/" + now)
-	
+
 	Log("admin", "Backed up")
-	
+
 	return True
 
 @login_required
@@ -609,9 +652,9 @@ def AdminLogsDeleteOlderThan(days):
 	#delete logs older than x days
 	db.session.query(Logs).filter(Logs.time < int(time.time()) - seconds).delete()
 	db.session.commit()
- 
+
 	Log("admin", current_user.username + " deleted logs older than " + str(days) + " days")
- 
+
 	return redirect("/admin/logs")
 
 @login_required
@@ -627,25 +670,25 @@ def AdminUpsightDeleteOlderThan(days):
 	#delete logs older than x days
 	db.session.query(UpsightLogs).filter(UpsightLogs.time < int(time.time()) - seconds).delete()
 	db.session.commit()
- 
+
 	Log("admin", current_user.username + " deleted upsight logs older than " + str(days) + " days")
- 
+
 	return redirect("/admin/upsight")
 
 @login_required
 @app.route("/admin/logs", methods=['GET'])
 def AdminLogs():
 	if not isAdmin(current_user):
-		return abort(404)    
+		return abort(404)
 
 	perpage = 20
 	pagerequest = request.args.get('page', 1, type=int)
 	query = request.args.get('query', '', type=str)
 	logs = db.paginate(db.select(Logs).order_by(Logs.id.desc()), page=pagerequest, per_page=perpage)
-	
+
 	if query != '':
 		logs = db.paginate(db.select(Logs).filter(Logs.player == query).order_by(Logs.id.desc()), page=pagerequest, per_page=perpage)
-		
+
 	return render_template('admin_logs.html', logs=logs, query=query)
 
 @login_required
@@ -658,14 +701,14 @@ def AdminUpsight():
 	pagerequest = request.args.get('page', 1, type=int)
 	query = request.args.get('query', '', type=str)
 	logs = db.paginate(db.select(UpsightLogs).order_by(UpsightLogs.id.desc()), page=pagerequest, per_page=perpage)
-	
+
 	if query != '':
 		logs = db.paginate(db.select(UpsightLogs).filter(UpsightLogs.player_id == query).order_by(UpsightLogs.id.desc()), page=pagerequest, per_page=perpage)
-  
+
 	#convert time
 	for log in logs.items:
 		log.time = datetime.fromtimestamp(log.time)
-		
+
 	return render_template('admin_upsight.html', logs=logs, query=query)
 
 class Bans(db.Model):
@@ -673,7 +716,7 @@ class Bans(db.Model):
 	bantype = db.Column(db.String(80), nullable=False)
 	author = db.Column(db.String(80), nullable=True)
 	time = db.Column(db.Integer, nullable=True, default=int(time.time()))
-	
+
 	def as_dict(self):
 		return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
@@ -684,7 +727,7 @@ class Logs(db.Model):
 	player = db.Column(db.String(80), nullable=False)
 	ip = db.Column(db.String(80), nullable=True)
 	message = db.Column(db.String(8192), nullable=False)
- 
+
 class UpsightLogs(db.Model):
 	id = db.Column(db.Integer, primary_key=True)
 	player_id = db.Column(db.String(80), nullable=False)
@@ -692,12 +735,12 @@ class UpsightLogs(db.Model):
 	event = db.Column(db.String(80), nullable=False)
 	action = db.Column(db.String(80), nullable=False)
 	message = db.Column(db.String(1024), nullable=True)
- 
+
 def PlayerLog(ip:str,player:str, message:str):
 	db_log = Logs(date=datetime.now().strftime("%Y-%m-%d"), time=datetime.now().strftime("%H:%M:%S"), player=player, ip=ip, message=message)
 	db.session.add(db_log)
 	db.session.commit()
- 
+
 def IPFromRequest(request:Request):
 	ip = request.remote_addr
 	if request.headers.getlist("X-Forwarded-For"):
@@ -723,7 +766,7 @@ class Player(db.Model):
 	helpcount = db.Column(db.Integer, nullable=True, default=0)
 	anonymoushelpcount = db.Column(db.Integer, nullable=True, default=0)
 	devicename = db.Column(db.String(128), nullable=True)
- 
+
 	def as_dict(self):
 		return {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
@@ -735,6 +778,13 @@ def Index():
 def Manifest():
 	with open("data/persist/manifest.json", "r") as f:
 		return f.read()
+
+@app.route("/persist/static/Blueprints/<path:filename>", methods=['GET'])
+def get_blueprints(filename):
+    file_path = os.path.join("data/persist/blueprints", filename)
+
+    with open(file_path, "r") as file:
+        return file.read()
 
 #only works in v1.18.0
 @app.route("/persist/static/blueprints", methods=['GET'])
@@ -751,7 +801,7 @@ def Blueprints():
 @app.route("/persist/messages_received_ids")
 def PersistMessagesReceivedIDs():
 	return send_from_directory(directory="", path="data/persist/messages_received_ids.json", as_attachment=True, download_name="messages_received_ids.json")
-	
+
 @app.route("/persist/messages_get/<string:message>")
 def PersistMessagesGet(message):
     #check if message exists
@@ -761,12 +811,12 @@ def PersistMessagesGet(message):
 
 @app.route("/time/")
 def Time():
-	data = {
-		"data": {
-			"server_time": f"{datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')}",
-		}
-	}
-	return jsonify(data)
+    data = {
+        "data": {
+            "server_time": datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT'),
+        }
+    }
+    return jsonify(data)
 
 @app.route("/account/preAuth/")
 def AccountPreAuth():
@@ -781,25 +831,25 @@ def AccountPreAuth():
 def AccountGCAuth():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	if InvalidUsername(clientData["player_id"]):
 		return make_response("Invalid Username!", 400)
 
 	if IsUserBanned(clientData["player_id"], IPFromRequest(request)):
 		return make_response("User is banned!", 400)
- 
+
 	#Create user if it doesn't exist
 	db_user = Player.query.filter_by(username=clientData["player_id"]).first()
- 
+
 	isplayernew = False
- 
+
 	if db_user is None:
 		db_user = Player(username=clientData["player_id"])
 		db.session.add(db_user)
 		db.session.commit()
 		isplayernew = True
 		PlayerLog(ip=IPFromRequest(request), player=clientData["player_id"], message="Created new player")
-     
+
 
 	data = {
 		"data": {
@@ -821,7 +871,7 @@ def GetCountryCode():
 def MultiplayerNewPlayer():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	#Make sure username is valid
 	if InvalidUsername(clientData["name"]):
 		return make_response("Invalid username!", 400)
@@ -840,9 +890,9 @@ def MultiplayerNewPlayer():
 	db_user.allyboxspace = clientData["allyboxspace"]
 	db_user.level = clientData["level"]
 	db.session.commit()
- 
+
 	PlayerLog(IPFromRequest(request), clientData["player_id"], f"Set Multiplayer name to {clientData['name']}\nSet Deck Rank to {clientData['deck_rank']}\nSet Landscapes to {clientData['landscapes']}\nSet Helper Creature to {clientData['helper_creature']}\nSet Leader to {clientData['leader']}\nSet Leader Level to {clientData['leader_level']}\nSet Allyboxspace to {clientData['allyboxspace']}\nSet Level to {clientData['level']}")
- 
+
 	return jsonify({
 		"success": True,
 		"data": {
@@ -852,7 +902,7 @@ def MultiplayerNewPlayer():
 			"level": str(clientData["leader_level"]),
 			"trophies": "0" #Unused
 		}
-	})	
+	})
 
 @app.route("/multiplayer/update_deck_name/", methods=['POST'])
 def MultiplayerUpdateDeckName():
@@ -870,26 +920,26 @@ def MultiplayerUpdateDeckName():
 	db_user.landscapes = clientData["landscapes"]
 	db_user.helper_creature = clientData["helper_creature"]
 	db_user.leader = clientData["leader"]
- 
+
 	#if this is a fresh account and user is attempting to set leader level to a high number, ban user
-	if db_user.leader_level is None and int(clientData["leader_level"]) > 5:
+	if db_user.leader_level is None and int(clientData["leader_level"]) > 9999999:
 		DiscordWebhookMessage(f"{clientData['player_id']} attempted to set leader level to a {clientData['leader_level']} on a fresh account! IP: " + IPFromRequest(request))
 		SystemBan(clientData["player_id"])
-	elif db_user.leader_level is not None and int(clientData["leader_level"]) > int(db_user.leader_level) + 10: #Make sure leader level is incremented by more than 10, if not, ban user
+	elif db_user.leader_level is not None and int(clientData["leader_level"]) > int(db_user.leader_level) + 9999999: #Make sure leader level is incremented by more than 10, if not, ban user
 		DiscordWebhookMessage(f"{clientData['player_id']} attempted to set leader level to {clientData['leader_level']} when it was set to {db_user.leader_level}! IP: " + IPFromRequest(request))
 		SystemBan(clientData["player_id"])
- 
+
 	db_user.leader_level = clientData["leader_level"]
 	db_user.allyboxspace = clientData["allyboxspace"]
- 
+
 	db.session.commit()
- 
+
 	PlayerLog(IPFromRequest(request), clientData["player_id"], f"Set Deck Rank to {clientData['deck_rank']}\nSet Landscapes to {clientData['landscapes']}\nSet Helper Creature to {clientData['helper_creature']}\nSet Leader to {clientData['leader']}\nSet Leader Level to {clientData['leader_level']}\nSet Allyboxspace to {clientData['allyboxspace']}")
- 
+
 	return jsonify({
 		"success": True
 	})
- 
+
 def get_hash_string(source_value, key):
 	hmac_sha256 = hmac.new(key.encode('utf-8'), source_value.encode('utf-8'), hashlib.sha256)
 	return hmac_sha256.hexdigest()
@@ -898,25 +948,25 @@ def get_hash_string(source_value, key):
 def UserAction2():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	if IsUserBanned(clientData["player_id"], IPFromRequest(request)):
 		return make_response("User is banned!", 400)
-	
+
 	UpdateLastOnline(clientData["player_id"])
- 
+
 	#Check if an event was sent
 	if "evt" in clientData:
 		db_user = Player.query.filter_by(username=clientData["player_id"]).first()
 		if db_user is None:
 			return make_response("No player found!", 404)
-		
+
 		FreeHardCurrency = int(clientData["fr"])
 		df = int(clientData["df"])
-  
+
 		finalamount = FreeHardCurrency + df
 
 		PlayerLog(IPFromRequest(request), clientData["player_id"], f"User Action: {clientData['evt']}\nFree Hard Currency: {FreeHardCurrency}\nDF: {df}\nFinal Amount: {finalamount}")
-  
+
 		key = "5424498w34tiowhtgoae0tu4iksdf4_4" + clientData["player_id"] + "650"
 		handle = get_hash_string(clientData["player_id"], key)
 
@@ -928,8 +978,8 @@ def UserAction2():
 		data = {
 			"success": True,
 		}
-	
-	return jsonify(data) 
+
+	return jsonify(data)
 
 def InvalidUsername(username):
 	username = username.lower()
@@ -953,17 +1003,17 @@ def IsUserBanned(username, ip=None):
 	db_ip = Bans.query.filter_by(username=ip).first()
 	if db_ip is not None:
 		return True
-	
+
 	return False
 
-@app.route("/persist/game", methods=['GET', 'PUT'])
-def PersistGame():
- 
+@app.route("/persist/<string:id>/game", methods=['GET', 'PUT'])
+def PersistGame(id):
+
 	if request.headers.get("Player-Id") is None:
 		DiscordWebhookMessage("User attempted to access game without Player-Id header. IP: " + IPFromRequest(request))
 		abort(404)
 	username = request.headers.get("Player-Id")
- 
+
 	#verify headers
 	if request.headers.get("Age") is None:
 		DiscordWebhookMessage(username +" attempted to access game without Age header. IP: " + IPFromRequest(request))
@@ -981,7 +1031,7 @@ def PersistGame():
 		if request.headers.get("X-Nick-Description") is None:
 			DiscordWebhookMessage(username +" attempted to access game without X-Nick-Description header. IP: " + IPFromRequest(request))
 			abort(404)
-  
+
 	if InvalidUsername(username):
 		return make_response("Invalid Username!", 400)
 	if IsUserBanned(username, IPFromRequest(request)):
@@ -1001,9 +1051,9 @@ def PersistGame():
 		if DeviceNameUser.devicename != devicename:
 			DiscordWebhookMessage(username + " attempted to access game with wrong device name. Device name: '" + devicename + "'. IP: " + IPFromRequest(request))
 			return make_response("Invalid Username!", 400)
-	
+
 	UpdateLastOnline(username)
- 
+
 	#check if user is PVP banned
 	pvp_ban_db_user = Player.query.filter_by(username=username).first()
 	if pvp_ban_db_user is not None:
@@ -1016,7 +1066,7 @@ def PersistGame():
 					return make_response("User is banned!", 400)
 		except Exception as e:
 			Log("persist", "Error while checking if user is PVP banned: " + str(e))
-	
+
 	if request.method == 'GET':
 		db_user = Player.query.filter_by(username=username).first()
 		if db_user is None:
@@ -1033,7 +1083,7 @@ def PersistGame():
 		#check if data is encrypted
 		if not data.startswith(b"username=") or data.startswith(b"{"):
 			DiscordWebhookMessage(username +" attempted to put game data without encryption. IP: " + IPFromRequest(request) + ". Data: " + data.decode("utf-8")[:50])
-		
+
 		db_user = Player.query.filter_by(username=username).first()
 		if db_user is None:
 			return make_response("No game found!", 404)
@@ -1056,9 +1106,9 @@ def AllyBoxSpaceNotExceeded(player_id):
 
 	#count number of friends
 	friends = json.loads(user.friends)
- 
+
 	friends_count = 0
- 
+
 	for friend in friends:
 		#check if user is banned
 		if IsUserBanned(friend):
@@ -1068,21 +1118,21 @@ def AllyBoxSpaceNotExceeded(player_id):
 			continue
 
 		friends_count += 1
-	
+
 	return friends_count < user.allyboxspace
 
 @app.route("/persist/friends/<string:player_id>")
 def PersistFriends(player_id):
 	UpdateLastOnline(player_id)
 	db_user = Player.query.filter_by(username=player_id).first()
- 
+
 	if db_user is None:
 		return make_response("No player found!", 404)
 
 	data = []
- 
+
 	player_friends = json.loads(db_user.friends)
- 
+
 	for friend in player_friends:
 		#check if user is banned
 		if IsUserBanned(friend):
@@ -1091,23 +1141,23 @@ def PersistFriends(player_id):
 		allyinfo = GetAllyInfo(friend, True)
 		if allyinfo is not None:
 			data.append(allyinfo)
- 
+
 	return jsonify(data)
 
 @app.route("/persist/friends_find_candidatesDW/", methods=['POST'])
 def PersistFriendsFindCandidates():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	db_user = Player.query.filter_by(username=clientData["player_id"]).first()
- 
+
 	if db_user is None:
 		return make_response("No player found!", 404)
 
 	data = []
- 
+
 	player_friends = json.loads(db_user.friends)
- 
+
 	for friend in player_friends:
 		#check if user is banned
 		if IsUserBanned(friend):
@@ -1117,7 +1167,7 @@ def PersistFriendsFindCandidates():
 		allyinfo = GetAllyInfo(friend, True)
 		if allyinfo is not None:
 			data.append(allyinfo)
-		
+
 	#Add explorers
 	strangers = Player.query.filter(
 		Player.username != clientData["player_id"],  # not the player
@@ -1125,7 +1175,7 @@ def PersistFriendsFindCandidates():
 		Player.helper_creature != None,  # has a helper creature
 		Player.leader_level.between(db_user.leader_level - int(clientData["level"]), db_user.leader_level + int(clientData["level"]))  # level is within clientData["level"]
 	).order_by(func.random()).limit(3).all()
- 
+
 	for stranger in strangers:
 		if IsUserBanned(stranger.username):
 			continue
@@ -1133,10 +1183,10 @@ def PersistFriendsFindCandidates():
 		allyinfo = GetAllyInfo(stranger.username, False)
 		if allyinfo is not None:
 			data.append(allyinfo)
-	
+
 	#randomize list
 	data = random.sample(data, len(data))
-  
+
 	data2 = {
 		"success": True,
 		"data": json.dumps(data)
@@ -1147,8 +1197,8 @@ def PersistFriendsFindCandidates():
 def PersistFriendsUseFriend():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
- 
+
+
 	db_ally = Player.query.filter_by(username=clientData["friendid"]).first()
 
 	if db_ally is None:
@@ -1156,7 +1206,7 @@ def PersistFriendsUseFriend():
 
 	db_ally.helpcount = int(db_ally.helpcount) + 1
 	db.session.commit()
- 
+
 	data = {
 		"success": True,
 	}
@@ -1166,15 +1216,15 @@ def PersistFriendsUseFriend():
 def PersistFriendsUsePlayer():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
- 
+
+
 	db_stranger = Player.query.filter_by(username=clientData["userid"]).first()
 	if db_stranger is None:
 		return make_response("No player found!", 404)
 
 	db_stranger.anonymoushelpcount = int(db_stranger.anonymoushelpcount) + 1
 	db.session.commit()
- 
+
 	data = {
 		"success": True,
 	}
@@ -1184,9 +1234,9 @@ def PersistFriendsUsePlayer():
 def PersistFriendsRequestWithMyInfo():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	UpdateLastOnline(clientData["player_id"])
-	
+
 	try:
 		invite_user = Player.query.filter_by(username=clientData["invite_id"].replace("_", "-")).first()
 	except:
@@ -1208,7 +1258,7 @@ def PersistFriendsRequestWithMyInfo():
 			"success": True,
 			"info": "exceed me"
 		})
-  
+
 	#friend ally check
 	friendallycheck = AllyBoxSpaceNotExceeded(clientData["invite_id"].replace("_", "-"))
 	if friendallycheck == False:
@@ -1216,7 +1266,7 @@ def PersistFriendsRequestWithMyInfo():
 			"success": True,
 			"info": "exceed"
 		})
- 
+
 	#check if player already sent a request
 	if clientData["player_id"] not in invite_user.friend_requests:
 		inviteuserfr.append(clientData["player_id"])
@@ -1230,7 +1280,7 @@ def PersistFriendsRequestWithMyInfo():
 			"success": True,
 			"info": "duplicate"
 		})
-  
+
 def GetAllyInfo(player_id: str, isally: bool):
 	db_user = Player.query.filter_by(username=player_id).first()
 	if db_user is None:
@@ -1249,7 +1299,7 @@ def GetAllyInfo(player_id: str, isally: bool):
 			"helpercreature": db_user.helper_creature,
 			"landscapes": db_user.landscapes,
 			"ally": "1" if isally else "0",
-			"sincelastactivedate": str(int(time.time()) - db_user.last_online)	
+			"sincelastactivedate": str(int(time.time()) - db_user.last_online)
 		}
 	}
 	return data
@@ -1261,14 +1311,14 @@ def PersistFriendsAllRequestsReceived(player_id):
 		return make_response("No player found!", 400)
 
 	data = []
- 
+
 	playerfriendrequests = json.loads(db_user.friend_requests)
- 
+
 	for friendrequest in playerfriendrequests:
 		allyinfo = GetAllyInfo(friendrequest, False)
 		if allyinfo is not None:
 			data.append(allyinfo)
- 
+
 	return jsonify(data)
 
 @app.route("/persist/friends_deny_request/<string:player_id>/<string:invite_id>", methods=['GET'])
@@ -1277,25 +1327,25 @@ def PersistFriendsDenyRequest(player_id, invite_id):
 	if db_user is None:
 		return make_response("No player found!", 400)
 
-	UpdateLastOnline(player_id)	
- 
+	UpdateLastOnline(player_id)
+
 	#remove friend request
 	player_requests = json.loads(db_user.friend_requests)
 	player_requests.remove(invite_id)
 	db_user.friend_requests = json.dumps(player_requests)
- 
+
 	db.session.commit()
 	return jsonify({
 		"success": True
 	})
- 
+
 @app.route("/persist/friends_confirm_request_withmyinfoDW/", methods=['POST'])
 def PersistFriendsConfirmRequestWithMyInfo():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	UpdateLastOnline(clientData["player_id"])
- 
+
 	db_user = Player.query.filter_by(username=clientData["player_id"]).first()
 	if db_user is None:
 		return make_response("No player found!", 400)
@@ -1307,7 +1357,7 @@ def PersistFriendsConfirmRequestWithMyInfo():
 			"success": True,
 			"info": "exceed me"
 		})
-  
+
 	#friend ally check
 	friendallycheck = AllyBoxSpaceNotExceeded(clientData["invite_id"])
 	if friendallycheck == False:
@@ -1320,28 +1370,28 @@ def PersistFriendsConfirmRequestWithMyInfo():
 	player_requests = json.loads(db_user.friend_requests)
 	player_requests.remove(clientData["invite_id"])
 	db_user.friend_requests = json.dumps(player_requests)
- 
+
 	#add friend
 	player_friends = json.loads(db_user.friends)
 	player_friends.append(clientData["invite_id"])
 	db_user.friends = json.dumps(player_friends)
- 
+
 	#add self to friend's friend list
 	friend_user = Player.query.filter_by(username=clientData["invite_id"]).first()
- 
+
 	if friend_user is None:
 		return make_response("No player found!", 400)
 
 	friend_friends = json.loads(friend_user.friends)
 	friend_friends.append(clientData["player_id"])
 	friend_user.friends = json.dumps(friend_friends)
- 
+
 	db.session.commit()
- 
+
 	return jsonify({
 		"success": True
 	})
- 
+
 @app.route("/persist/friends_remove/<string:player_id>/<string:invite_id>", methods=['GET'])
 def PersistFriendsRemove(player_id, invite_id):
 	db_user = Player.query.filter_by(username=player_id).first()
@@ -1352,19 +1402,19 @@ def PersistFriendsRemove(player_id, invite_id):
 	player_friends = json.loads(db_user.friends)
 	player_friends.remove(invite_id)
 	db_user.friends = json.dumps(player_friends)
- 
+
 	#remove self from friend
 	friend_user = Player.query.filter_by(username=invite_id).first()
- 
+
 	if friend_user is None:
 		return make_response("No player found!", 400)
 
 	friend_friends = json.loads(friend_user.friends)
 	friend_friends.remove(player_id)
 	friend_user.friends = json.dumps(friend_friends)
-	
+
 	db.session.commit()
- 
+
 	return jsonify({
 		"success": True
 	})
@@ -1389,11 +1439,11 @@ def AnalyticsUpsight():
 	)
 	db.session.add(newAnalytics)
 	db.session.commit()
- 
+
 	if headers.get("Event-Action") == "detector":
 		DiscordWebhookMessage(headers.get("Player-Id") + " triggered ACTk Anti-Cheat. Data:" + message)
 		SystemBan(headers.get("Player-Id"))
- 
+
 	return make_response("OK", 200)
 
 @app.route("/analytics/pvpmatch", methods=['POST'])
@@ -1406,26 +1456,26 @@ def AnalyticsPVPMatch():
 	message = request.get_data().decode('utf-8')
 	if message == "null":
 		message = None
- 
+
 	#write to file
 	os.makedirs("data/persist/pvpmatches", exist_ok=True)
- 
+
 	with open("data/persist/pvpmatches/" + headers.get("Player-Id", "unknown") +"_"+ headers.get("Match-Id", "unknown") + ".json", "w") as outfile:
 		message = json.loads(message)
 		json.dump(message, outfile, indent=4)
- 
+
 	return make_response("OK", 200)
 
 @app.route("/dw_leaderboard/fetchentries/", methods=['POST'])
 def LeaderboardFetchEntries():
 	clientData = parse_qs(request.get_data().decode('utf-8'))
 	clientData = {k: v[0] if len(v) == 1 else v for k, v in clientData.items()}
- 
+
 	#go through each players save and sort by ammount of wins
 	allplayers = Player.query.all()
- 
+
 	leaderboard = []
- 
+
 	for player in allplayers:
 		if player.multiplayer_name is None or player.multiplayer_name == b"" or player.multiplayer_name == b" ":
 			continue
@@ -1440,7 +1490,7 @@ def LeaderboardFetchEntries():
 			playerwins = GetPlayerWins(player.username)
 		except Exception:
 			continue
-  
+
 		if playerwins is None or playerwins == 0:
 			continue
 		leaderboard.append({
@@ -1448,21 +1498,21 @@ def LeaderboardFetchEntries():
 			"playername": player.multiplayer_name,
 			"score": int(playerwins)
 		})
- 
+
 	#sort leaderboard by score
 	leaderboard = sorted(leaderboard, key=lambda k: k['score'], reverse=True)
- 
+
 	leaderboard = leaderboard[:50]
-	
+
 	#set "ranking" based on position in leaderboard
 	for i in range(len(leaderboard)):
 		leaderboard[i]["ranking"] = int(i+1)
- 
+
 	return jsonify({
 		"success": True,
 		"data" : f"{json.dumps(leaderboard)}"
 	})
- 
+
 def GetPlayerWins(player_id):
 	db_user = Player.query.filter_by(username=player_id).first()
 	if db_user is None:
@@ -1499,7 +1549,7 @@ def GetPlayerWins(player_id):
 		#if the time is after enddate, use the last season
 		if currentSeason == "":
 			currentSeason = seasons[-1]["Season"]
-   
+
 	if game["ActivePvpSeason"] != currentSeason:
 		return None
 
@@ -1517,11 +1567,11 @@ def GetPlayerWins(player_id):
 def run_scheduler():
     # Run backup every 4 hours
     schedule.every(4).hours.do(Backup)
-    
+
     while True:
         schedule.run_pending()
         time.sleep(1)
-	
+
 def Log(category, message):
 	os.makedirs("data/persist/logs", exist_ok=True)
 	date = datetime.now().strftime("%Y-%m-%d")
@@ -1532,7 +1582,7 @@ def Log(category, message):
 
 if __name__ == '__main__':
 	Log("server", "Starting server...")
- 
+
 	#create version.txt and android_version.txt if they don't exist
 	if not os.path.exists("data/persist/version.txt"):
 		with open("data/persist/version.txt", "w") as f:
@@ -1540,7 +1590,7 @@ if __name__ == '__main__':
 	if not os.path.exists("data/persist/android_version.txt"):
 		with open("data/persist/android_version.txt", "w") as f:
 			f.write("1.0.0")
-	
+
 	app.run(debug=args.debug, port=args.port)
 
 with app.app_context():
